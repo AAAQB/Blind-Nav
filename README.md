@@ -30,8 +30,7 @@
 - [Algorithm Details](#algorithm-details)
   - [Accessibility Cost Function](#accessibility-cost-function)
   - [Time-Dependent Dynamic Cost](#time-dependent-dynamic-cost)
-  - [A\* Search](#a-search)
-  - [Bidirectional A\* Search](#bidirectional-a-search)
+  - [Weighted Bidirectional A\* (Fusion Algorithm)](#weighted-bidirectional-a-fusion-algorithm)
 - [Project Structure](#project-structure)
 - [API Reference](#api-reference)
 - [Configuration](#configuration)
@@ -50,10 +49,10 @@
 - **Accessibility-First Routing** — Routes are scored on tactile paving, steps, surface smoothness, sidewalk presence, lighting, road width, and incline.
 - **Multi-City Support** — Pre-configured for Kuala Lumpur, Singapore, Tokyo, and Berlin, with dynamic area loading for any location worldwide.
 - **Time-Aware Dynamic Costs** — Lighting and crowd multipliers adjust route costs by hour of day (dawn, day, dusk, night, late night).
-- **Multiple Navigation Modes** — Preset weight profiles for Blind, Wheelchair, Elderly, Night, Stroller, and Balanced preferences.
+- **Multiple Navigation Modes** — Preset weight profiles for Blind, Wheelchair, Elderly, and Balanced preferences.
 - **Interactive Map UI** — Built with React + MapLibre GL JS. Click to set start/end points, switch map styles, and view route details.
 - **Rich Route Analysis** — Per-route statistics including tactile paving coverage, lighting percentage, sidewalk availability, steps count, and road type breakdown.
-- **Dual Search Algorithms** — Standard weighted A\* and bidirectional A\* with meet-in-the-middle optimization.
+- **Weighted Bidirectional A\* Algorithm** — A fusion of weighted heuristic search and bidirectional meet-in-the-middle expansion for optimal accessibility-aware pathfinding.
 - **RESTful API** — Clean Flask backend with JSON endpoints for seamless integration.
 
 ---
@@ -165,16 +164,14 @@ The application follows a three-tier architecture:
 
 ### Navigation Modes
 
-BlindNav offers six preset navigation modes, each with specially tuned weight coefficients:
+BlindNav offers four preset navigation modes, each with specially tuned weight coefficients:
 
-| Mode | Icon | Description | Key Priorities |
-|------|------|-------------|----------------|
-| **Blind** | — | For visually impaired users | Tactile paving (×5.0), sidewalks (×4.0), avoids steps |
-| **Wheelchair** | — | For wheelchair users | Step-free (×5.0), wide paths (×4.0), smooth surfaces (×3.5) |
-| **Elderly** | — | For elderly pedestrians | Good lighting (×3.0), smooth surfaces (×3.0), gentle slopes (×2.5) |
-| **Night** | — | For nighttime walking | Lighting (×5.0), avoids unlit/isolated segments |
-| **Stroller** | — | For parents with strollers | Step-free (×5.0), smooth (×3.5), wide (×3.5), gentle slopes (×3.0) |
-| **Balanced** | — | Generic pedestrian | Moderate preferences across all factors |
+| Mode | Description | Key Priorities |
+|------|-------------|----------------|
+| **Blind** | For visually impaired users | Tactile paving (×5.0), sidewalks (×4.0), avoids steps |
+| **Wheelchair** | For wheelchair users | Step-free (×5.0), wide paths (×4.0), smooth surfaces (×3.5) |
+| **Elderly** | For elderly pedestrians | Good lighting (×3.0), smooth surfaces (×3.0), gentle slopes (×2.5) |
+| **Balanced** | Generic pedestrian | Moderate preferences across all factors |
 
 ### Time-Aware Routing
 
@@ -244,25 +241,18 @@ Where:
   - $m_{\text{slot}}$ = crowd multiplier for the current time slot
   - $w_{\text{traffic}}$ = traffic weight for the road type (motorway=2.0, footway=0.6, etc.)
 
-### A\* Search
+### Weighted Bidirectional A\* (Fusion Algorithm)
 
-The `WeightedAStar` implementation uses a classic A\* framework with:
+BlindNav's core pathfinder fuses **weighted heuristic search** with **bidirectional meet-in-the-middle expansion**, combining the strengths of both approaches:
 
-- **Heuristic:** Approximate Euclidean distance (accounting for latitude scaling), well-aligned with the metric cost dimension.
-- **Priority:** $f(n) = g(n) + w \cdot h(n)$ where $w = 1.0$ (admissible) by default.
-- **Termination:** When the goal node is popped from the frontier.
-- **Dead-end detection:** Exhausts the frontier up to 200,000 iterations.
+- **Weighted Heuristic:** Each expansion step uses the priority function $f(n) = g(n) + w \cdot h(n)$ where $w = 1.0$ (admissible) by default and $h(n)$ is the approximate Euclidean distance (accounting for latitude scaling), well-aligned with the metric cost dimension.
+- **Bidirectional Expansion:** Two frontiers grow simultaneously — one forward from the start node and one backward from the goal node — alternating expansion to balance progress.
+- **Meeting Detection:** When a node appears in both closed sets, a candidate solution is found.
+- **Early Termination:** If the minimum $f$-scores of both frontiers exceed the best known total cost, no better path can exist and the search stops immediately.
+- **Path Reconstruction:** Forward half from start to meet node, backward half from meet node to goal.
+- **Dead-end Detection:** The search exhausts its frontier up to 200,000 iterations.
 
-### Bidirectional A\* Search
-
-The `BidirectionalAStar` algorithm expands from **both** the start and goal simultaneously:
-
-1. Two frontiers alternate expansion steps.
-2. **Meeting detection:** When a node appears in both closed sets, a candidate solution is found.
-3. **Early termination:** If the minimum $f$-scores of both frontiers exceed the best known total cost, no better path exists.
-4. **Path reconstruction:** Forward half from start → meet node, backward half from meet node → goal.
-
-This typically explores **far fewer nodes** than standard A\*, especially in large road networks.
+This fusion typically explores **far fewer nodes** than standard unidirectional A\*, especially in large road networks, while retaining the optimality guarantees of a weighted heuristic.
 
 ---
 
