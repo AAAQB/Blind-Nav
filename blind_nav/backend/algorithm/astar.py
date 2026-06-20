@@ -1,19 +1,17 @@
 from __future__ import annotations
 import heapq
-import math
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import networkx as nx
 from backend.config import MAX_SEARCH_ITERATIONS, HEURISTIC_WEIGHT
+from backend.utils.geoutils import euclidean_approx
 logger = logging.getLogger(__name__)
 @dataclass(order=True)
 class _PrioritizedNode:
     f_score: float
     g_score: float = field(compare=False)
     node_id: int = field(compare=False)
-    parent_id: Optional[int] = field(compare=False, default=None)
-    edge_tags: Dict[str, Any] = field(compare=False, default_factory=dict)
 class WeightedAStar:
     def __init__(
         self,
@@ -79,7 +77,6 @@ class WeightedAStar:
                         f_score=tentative + self._w * h,
                         g_score=tentative,
                         node_id=nid,
-                        parent_id=cid,
                     ))
             if progress_callback:
                 progress_callback(explored, len(closed), len(frontier))
@@ -87,7 +84,8 @@ class WeightedAStar:
         return None
     @staticmethod
     def _heuristic(a: Tuple[float, float], b: Tuple[float, float]) -> float:
-        return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
+        # Use approximate metric distance, more accurate than raw lon/lat Euclidean
+        return euclidean_approx(a, b)
 def _node_pos(graph: nx.Graph, nid: int) -> Tuple[float, float]:
     return (graph.nodes[nid].get("y", 0.0), graph.nodes[nid].get("x", 0.0))
 def _edge_tags(graph: nx.Graph, u: int, v: int) -> Dict[str, Any]:

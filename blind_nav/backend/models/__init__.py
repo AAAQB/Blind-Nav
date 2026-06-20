@@ -24,7 +24,7 @@ class PathResult:
     total_distance_m: float = 0.0
     explored_count: int = 0
     time_slot: str = "day"
-    time_slot_name: str = "白天"
+    time_slot_name: str = "day"
     algorithm: str = "weighted_a*"
     num_nodes: int = 0
     meet_node: Optional[int] = None

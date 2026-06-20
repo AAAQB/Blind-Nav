@@ -8,7 +8,6 @@ def haversine(a: Tuple[float, float], b: Tuple[float, float]) -> float:
     dlat, dlon = lat2 - lat1, lon2 - lon1
     sin_h = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
     return _EARTH_RADIUS * 2 * math.atan2(math.sqrt(sin_h), math.sqrt(1 - sin_h))
-haversine_distance = haversine
 def euclidean_approx(a: Tuple[float, float], b: Tuple[float, float]) -> float:
     dlat = (a[0] - b[0]) * 111_320
     dlon = (a[1] - b[1]) * 111_320 * math.cos(math.radians((a[0] + b[0]) / 2))

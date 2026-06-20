@@ -4,7 +4,9 @@ import os
 import pickle
 from typing import Any, Dict, Optional
 import networkx as nx
-from backend.config import HIGHWAY_TAG_DEFAULTS, FALLBACK_DEFAULTS, OSM_NETWORK_TYPE
+from backend.config import (
+    HIGHWAY_TAG_DEFAULTS, FALLBACK_DEFAULTS, REGION_TAG_OVERRIDES, OSM_NETWORK_TYPE,
+)
 logger = logging.getLogger(__name__)
 _ACCESSIBILITY_KEYS = frozenset({
     "tactile_paving", "steps", "surface", "lit", "sidewalk",
@@ -26,6 +28,7 @@ class OSMLoader:
         dist: float = 1000.0,
         network_type: str = OSM_NETWORK_TYPE,
         force_reload: bool = False,
+        area: str = "",
     ) -> nx.Graph:
         import osmnx as ox
         key = f"walk_{lat:.4f}_{lon:.4f}_{int(dist)}"
@@ -38,10 +41,10 @@ class OSMLoader:
             (lat, lon),
             dist=dist,
             network_type=network_type,
-            simplify=True,
+            simplify=False,
             retain_all=True,
         )
-        self._enrich_tags(G_multi)
+        self._enrich_tags(G_multi, area=area)
         G = _to_undirected(G_multi)
         self._save_cache(G, cache_path)
         self._graph = G
@@ -52,6 +55,7 @@ class OSMLoader:
         north: float, south: float, east: float, west: float,
         network_type: str = OSM_NETWORK_TYPE,
         force_reload: bool = False,
+        area: str = "",
     ) -> nx.Graph:
         import osmnx as ox
         key = f"{network_type}_{north:.4f}_{south:.4f}_{east:.4f}_{west:.4f}"
@@ -64,7 +68,7 @@ class OSMLoader:
             north=north, south=south, east=east, west=west,
             network_type=network_type, simplify=True, retain_all=True,
         )
-        self._enrich_tags(G_multi)
+        self._enrich_tags(G_multi, area=area)
         G = _to_undirected(G_multi)
         self._save_cache(G, cache_path)
         self._graph = G
@@ -87,7 +91,17 @@ class OSMLoader:
         n = self._graph.number_of_nodes()
         e = self._graph.number_of_edges()
         return {"nodes": n, "edges": e, "avg_degree": (2 * e) / max(n, 1)}
-    def _enrich_tags(self, G_multi: nx.MultiDiGraph) -> None:
+    def _enrich_tags(self, G_multi: nx.MultiDiGraph, area: str = "") -> None:
+        """Fill in missing OSM tags for all edges.
+
+        Priority (low to high):
+          1. FALLBACK_DEFAULTS (global fallback)
+          2. HIGHWAY_TAG_DEFAULTS (per-highway-type defaults)
+          3. REGION_TAG_OVERRIDES[area] (regional overrides, if area is non-empty)
+          4. Original OSM data (highest priority, preserved via setdefault)
+        """
+        region_overrides = REGION_TAG_OVERRIDES.get(area, {})
+
         for _u, _v, _k, data in G_multi.edges(keys=True, data=True):
             tags = data.setdefault("tags", {})
             hw = data.get("highway", "unclassified")
@@ -95,10 +109,17 @@ class OSMLoader:
                 hw = hw[0] or "unclassified"
             hw = str(hw).lower()
             tags.setdefault("highway", hw)
+
+            # Layer 1: per-highway-type defaults
             defaults = HIGHWAY_TAG_DEFAULTS.get(hw, FALLBACK_DEFAULTS)
-            for k, default_val in defaults.items():
+            # Layer 2: regional overrides (merged into defaults, higher priority)
+            hw_overrides = region_overrides.get(hw, {})
+            merged = {**defaults, **hw_overrides}
+
+            for k, default_val in merged.items():
                 if k not in tags or tags[k] is None:
                     tags[k] = default_val
+
             for k, v in tags.items():
                 data[k] = v
     def _load_cache(self, path: str) -> Optional[nx.Graph]:

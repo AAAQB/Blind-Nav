@@ -5,42 +5,50 @@ from backend.config import (
     TACTILE_PAVING_MAP, STEPS_MAP, SURFACE_MAP, LIGHTING_MAP,
     SIDEWALK_MAP, HIGHWAY_MAP, INCLINE_COST_PER_PERCENT,
     INCLINE_MAX_COST, WIDTH_THRESHOLD_M, WIDTH_COST_PER_METER_BELOW,
-    WIDTH_MAX_COST, UNKNOWN_SCORE, WeightCoefficients, get_time_slot,
+    WIDTH_MAX_COST, INCLINE_STR_MAP, UNKNOWN_SCORE, WeightCoefficients, get_time_slot,
 )
 logger = logging.getLogger(__name__)
+# Reference length (meters) for normalising accessibility cost.
+# When edge length is below this value, it is still used as-is
+# to avoid distortion from extremely short edges.
+_REFERENCE_LENGTH: float = 1.0
+
+
 class StaticCost:
     """Static accessibility cost for a single road segment.
 
-    The cost formula follows the project report (Section 3.3):
+    The cost formula:
 
-        C_static = (w_tactile  * alpha_tactile)
-                 + (w_steps    * alpha_steps)
-                 + (w_surface  * alpha_surface)
-                 + (w_lit      * alpha_lighting)
-                 + (w_sidewalk * alpha_sidewalk)
-                 + (w_highway  * alpha_highway)
-                 + (w_incline  * alpha_incline)
-                 + (w_width    * alpha_width)
+        C_static = unit_cost * effective_length
 
-    where w_* are the accessibility difficulty scores looked up from the
-    mapping tables (e.g. TACTILE_PAVING_MAP) and alpha_* are the weight
-    coefficients from WeightCoefficients.  The formula is a pure weighted
-    sum of dimension scores — no length normalisation term.
+    where:
+      - unit_cost  = SUM(score_i * weight_i)   — weighted sum of accessibility scores
+      - effective_length = max(edge_length, REFERENCE_LENGTH)
+                      — actual edge length in meters
+
+    With the length factor, A* can properly trade off
+    "longer but more accessible" vs "shorter but less accessible" paths.
+    The heuristic uses euclidean_approx returning metric distance,
+    aligned with the cost dimension.
     """
 
     def __init__(self, weights: Optional[WeightCoefficients] = None) -> None:
         self._w = weights or WeightCoefficients()
 
     def compute(self, tags: Dict[str, Any]) -> float:
-        cost  = self._map("tactile_paving", TACTILE_PAVING_MAP, tags) * self._w.tactile_paving
-        cost += self._map("steps", STEPS_MAP, tags) * self._w.steps
-        cost += self._map("surface", SURFACE_MAP, tags) * self._w.surface
-        cost += self._map("lit", LIGHTING_MAP, tags) * self._w.lighting
-        cost += self._map("sidewalk", SIDEWALK_MAP, tags) * self._w.sidewalk
-        cost += self._map("highway", HIGHWAY_MAP, tags) * self._w.highway
-        cost += self._incline_cost(tags.get("incline")) * self._w.incline
-        cost += self._width_cost(tags.get("width")) * self._w.width
-        return cost
+        length = float(tags.get("length", _REFERENCE_LENGTH))
+        eff_len = max(length, _REFERENCE_LENGTH)
+
+        unit_cost  = self._map("tactile_paving", TACTILE_PAVING_MAP, tags) * self._w.tactile_paving
+        unit_cost += self._map("steps", STEPS_MAP, tags) * self._w.steps
+        unit_cost += self._map("surface", SURFACE_MAP, tags) * self._w.surface
+        unit_cost += self._map("lit", LIGHTING_MAP, tags) * self._w.lighting
+        unit_cost += self._map("sidewalk", SIDEWALK_MAP, tags) * self._w.sidewalk
+        unit_cost += self._map("highway", HIGHWAY_MAP, tags) * self._w.highway
+        unit_cost += self._incline_cost(tags.get("incline")) * self._w.incline
+        unit_cost += self._width_cost(tags.get("width")) * self._w.width
+
+        return unit_cost * eff_len
     @staticmethod
     def _map(key: str, mapping: Dict[str, float], tags: Dict[str, Any]) -> float:
         val = tags.get(key)
@@ -56,7 +64,7 @@ class StaticCost:
             pct = abs(float(s))
             return min(pct * INCLINE_COST_PER_PERCENT, INCLINE_MAX_COST)
         except ValueError:
-            return {"steep": 8.0, "up": 4.0, "down": 4.0, "yes": 4.0}.get(s, 3.0)
+            return INCLINE_STR_MAP.get(s, 3.0)
     @staticmethod
     def _width_cost(raw: Any) -> float:
         if raw is None:
@@ -79,7 +87,14 @@ _TRAFFIC_WEIGHT: Dict[str, float] = {
 
 # Minimum crowd multiplier — prevents M_crowd from reaching zero when
 # crowd_multiplier < 1 combined with high traffic_weight road types.
-_M_CROWD_FLOOR: float = 0.5
+#
+# Mathematical derivation:
+#   M_crowd = 1.0 + (crowd_mult - 1.0) * traffic_weight
+#   Current bounds: crowd_mult ∈ [0.8, 1.5], traffic_weight ∈ [0.0, 2.0]
+#   Minimum achievable: 1.0 + (0.8 - 1.0) * 2.0 = 0.60 (dawn/late_night × motorway)
+#   Maximum achievable: 1.0 + (1.5 - 1.0) * 2.0 = 2.00 (night × motorway)
+# Setting floor = 0.6 ensures it activates precisely at the boundary case.
+_M_CROWD_FLOOR: float = 0.6
 
 
 class TimeDependentCost:

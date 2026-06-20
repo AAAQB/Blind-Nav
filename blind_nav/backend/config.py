@@ -1,7 +1,7 @@
 from __future__ import annotations
-import math
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from dataclasses import dataclass
+from typing import Dict, List, Optional, TypedDict
+# ── Score maps defining accessibility difficulty for each OSM tag value ──
 TACTILE_PAVING_MAP: Dict[str, float] = {
     "yes": 1.0,
     "incorrect": 5.0,
@@ -74,7 +74,11 @@ INCLINE_MAX_COST: float = 8.0
 WIDTH_THRESHOLD_M: float = 2.0
 WIDTH_COST_PER_METER_BELOW: float = 3.0
 WIDTH_MAX_COST: float = 6.0
+INCLINE_STR_MAP: Dict[str, float] = {
+    "steep": 8.0, "up": 4.0, "down": 4.0, "yes": 4.0,
+}
 UNKNOWN_SCORE: float = 5.0
+
 HIGHWAY_TAG_DEFAULTS: Dict[str, Dict[str, str]] = {
     "footway": {
         "tactile_paving": "yes", "steps": "no", "surface": "paving_stones",
@@ -134,6 +138,136 @@ FALLBACK_DEFAULTS: Dict[str, str] = {
     "lit": "no", "sidewalk": "no", "highway": "unclassified",
     "incline": "0%", "width": "2.0",
 }
+
+# ── Regional Tag Overrides ──
+# OSM data completeness and infrastructure characteristics vary greatly by region.
+# This table defines per-area overrides on top of HIGHWAY_TAG_DEFAULTS.
+# Only fields differing from the global defaults are listed.
+# Format: REGION_TAG_OVERRIDES[area_id][highway_type] = {tag: value, ...}
+REGION_TAG_OVERRIDES: Dict[str, Dict[str, Dict[str, str]]] = {
+    # ═══════════════════════════════════════════════════════════
+    # Kuala Lumpur, Malaysia — Tropical SE Asia
+    # Tactile paving uncommon, limited lighting,
+    # sidewalks often missing on main roads
+    # ═══════════════════════════════════════════════════════════
+    "kl": {
+        "footway": {
+            "tactile_paving": "limited",  # Some tactile paving in city center
+            "lit": "yes",                 # Good lighting in city center
+            "surface": "paving_stones",
+        },
+        "path": {"surface": "compacted", "lit": "no"},
+        "pedestrian": {"tactile_paving": "limited", "lit": "yes"},
+        "residential": {
+            "tactile_paving": "no",
+            "lit": "limited",
+            "sidewalk": "limited",
+        },
+        "tertiary": {"sidewalk": "no", "lit": "limited"},
+        "secondary": {"sidewalk": "no"},
+    },
+    # ═══════════════════════════════════════════════════════════
+    # Singapore — Modern garden city, excellent accessibility
+    # ═══════════════════════════════════════════════════════════
+    "singapore": {
+        "footway": {
+            "tactile_paving": "yes",
+            "lit": "yes",
+            "surface": "concrete",
+            "sidewalk": "yes",
+        },
+        "path": {
+            "tactile_paving": "limited",
+            "surface": "concrete",
+            "lit": "yes",
+            "sidewalk": "yes",
+        },
+        "pedestrian": {
+            "tactile_paving": "yes",
+            "lit": "yes",
+            "surface": "concrete",
+        },
+        "residential": {
+            "tactile_paving": "no",
+            "lit": "yes",
+            "sidewalk": "yes",
+        },
+        "tertiary": {"sidewalk": "limited", "lit": "yes"},
+        "secondary": {"sidewalk": "limited"},
+        "steps": {"tactile_paving": "yes"},  # Steps often have tactile paving
+    },
+    # ═══════════════════════════════════════════════════════════
+    # Tokyo — Global accessibility benchmark
+    # Tactile paving (ブロック) is ubiquitous,
+    # but streets tend to be narrower
+    # ═══════════════════════════════════════════════════════════
+    "tokyo": {
+        "footway": {
+            "tactile_paving": "yes",
+            "lit": "yes",
+            "surface": "asphalt",
+            "sidewalk": "yes",
+        },
+        "path": {
+            "tactile_paving": "limited",
+            "surface": "asphalt",
+            "lit": "yes",
+        },
+        "pedestrian": {
+            "tactile_paving": "yes",
+            "lit": "yes",
+            "surface": "asphalt",
+        },
+        "residential": {
+            "tactile_paving": "limited",
+            "lit": "yes",
+            "sidewalk": "yes",
+            "width": "2.5",  # Japanese residential streets are narrow
+        },
+        "tertiary": {
+            "sidewalk": "limited",
+            "lit": "yes",
+            "width": "3.0",
+        },
+        "secondary": {"sidewalk": "limited"},
+        "steps": {"tactile_paving": "yes"},  # Steps usually have tactile paving
+        "crossing": {"tactile_paving": "yes"},  # Crosswalks often have tactile paving
+    },
+    # ═══════════════════════════════════════════════════════════
+    # Berlin — Typical European city
+    # Good accessibility infrastructure, high sidewalk coverage
+    # ═══════════════════════════════════════════════════════════
+    "berlin": {
+        "footway": {
+            "tactile_paving": "yes",
+            "lit": "yes",
+            "surface": "paving_stones",  # Berlin's characteristic paving stone surfaces
+            "sidewalk": "yes",
+        },
+        "path": {
+            "tactile_paving": "limited",
+            "surface": "compacted",
+            "lit": "limited",
+            "sidewalk": "yes",
+        },
+        "pedestrian": {
+            "tactile_paving": "yes",
+            "lit": "yes",
+            "surface": "paving_stones",
+        },
+        "residential": {
+            "tactile_paving": "no",
+            "lit": "yes",
+            "sidewalk": "yes",
+        },
+        "tertiary": {"sidewalk": "limited", "lit": "yes"},
+        "secondary": {"sidewalk": "limited"},
+        "steps": {"tactile_paving": "yes"},
+    },
+}
+
+# ── Note: sepang & putrajaya configs removed as those regions were deprecated ──
+
 @dataclass
 class WeightCoefficients:
     tactile_paving: float = 3.0
@@ -177,21 +311,20 @@ class TimeSlot:
     crowd_multiplier: Base crowd factor for the period.
         - >1.0 means busier (rush hour, evening)
         - <1.0 means quieter (late night)
-        Actual M_crowd = max(0.5, 1.0 + (crowd_multiplier - 1.0) * traffic_weight)
+        Actual M_crowd = max(0.6, 1.0 + (crowd_multiplier - 1.0) * traffic_weight)
     """
     name: str
-    name_cn: str
     start_hour: int
     end_hour: int
     lighting_multiplier: float
     crowd_multiplier: float
 
 TIME_SLOTS: List[TimeSlot] = [
-    TimeSlot("dawn",       "清晨",  5,  7, 1.5, 0.8),   # early morning, sparse crowd
-    TimeSlot("day",        "白天",  7, 18, 0.5, 1.0),   # daytime, normal crowd
-    TimeSlot("dusk",       "傍晚", 18, 20, 1.5, 1.2),   # dusk, moderate crowd
-    TimeSlot("night",      "夜间", 20, 23, 3.0, 1.5),   # night, heavy crowd in lit areas
-    TimeSlot("late_night", "深夜", 23,  5, 2.0, 0.8),   # late night, sparse crowd (was 0.5 → bug fix)
+    TimeSlot("dawn",       5,  7, 1.5, 0.8),   # early morning, sparse crowd
+    TimeSlot("day",        7, 18, 0.5, 1.0),   # daytime, normal crowd
+    TimeSlot("dusk",      18, 20, 1.5, 1.2),   # dusk, moderate crowd
+    TimeSlot("night",     20, 23, 3.0, 1.5),   # night, heavy crowd in lit areas
+    TimeSlot("late_night",23,  5, 2.0, 0.8),   # late night, sparse crowd
 ]
 def get_time_slot(hour: int) -> TimeSlot:
     for slot in TIME_SLOTS:
@@ -204,8 +337,7 @@ def get_time_slot(hour: int) -> TimeSlot:
     return TIME_SLOTS[1]
 PRESET_MODES: Dict[str, Dict] = {
     "blind": {
-        "name": "盲人模式",
-        "name_en": "Blind Mode",
+        "name": "Blind Mode",
         "description": "Prioritises tactile paving, avoids steps, prefers "
                        "smooth surfaces and dedicated footways.",
         "weights": WeightCoefficients(
@@ -215,8 +347,7 @@ PRESET_MODES: Dict[str, Dict] = {
         ),
     },
     "wheelchair": {
-        "name": "轮椅模式",
-        "name_en": "Wheelchair Mode",
+        "name": "Wheelchair Mode",
         "description": "Wide, smooth, step-free, and gentle slopes.",
         "weights": WeightCoefficients(
             tactile_paving=1.0, steps=5.0, surface=3.5,
@@ -225,8 +356,7 @@ PRESET_MODES: Dict[str, Dict] = {
         ),
     },
     "elderly": {
-        "name": "长者模式",
-        "name_en": "Elderly Mode",
+        "name": "Elderly Mode",
         "description": "Flat, well-lit, smooth paths with minimal steps.",
         "weights": WeightCoefficients(
             tactile_paving=1.5, steps=4.0, surface=3.0,
@@ -235,8 +365,7 @@ PRESET_MODES: Dict[str, Dict] = {
         ),
     },
     "night": {
-        "name": "夜间模式",
-        "name_en": "Night Mode",
+        "name": "Night Mode",
         "description": "Well-lit routes, avoids unlit / isolated segments.",
         "weights": WeightCoefficients(
             tactile_paving=2.0, steps=3.0, surface=1.5,
@@ -245,8 +374,7 @@ PRESET_MODES: Dict[str, Dict] = {
         ),
     },
     "stroller": {
-        "name": "婴儿车模式",
-        "name_en": "Stroller Mode",
+        "name": "Stroller Mode",
         "description": "Smooth, wide, step-free, gentle slopes.",
         "weights": WeightCoefficients(
             tactile_paving=1.0, steps=5.0, surface=3.5,
@@ -255,8 +383,7 @@ PRESET_MODES: Dict[str, Dict] = {
         ),
     },
     "balanced": {
-        "name": "均衡模式",
-        "name_en": "Balanced Mode",
+        "name": "Balanced Mode",
         "description": "Generic pedestrian with moderate safety preferences.",
         "weights": WeightCoefficients(
             tactile_paving=2.0, steps=3.0, surface=2.0,
@@ -268,18 +395,18 @@ PRESET_MODES: Dict[str, Dict] = {
 HEURISTIC_WEIGHT: float = 1.0
 BIDIRECTIONAL_MEET_RADIUS: int = 1
 MAX_SEARCH_ITERATIONS: int = 200_000
-SMOOTH_ITERATIONS: int = 100
-SMOOTH_LEARNING_RATE: float = 0.5
-SMOOTH_TOLERANCE: float = 1e-4
-SMOOTH_INTERPOLATE_SPACING_M: float = 10.0
-AREA_CONFIGS: Dict[str, Dict] = {
-    "xmum": {"lat": 2.940, "lon": 101.535, "dist": 800, "name": "厦门大学马来西亚分校"},
-    "kl":   {"lat": 3.139, "lon": 101.686, "dist": 2000, "name": "吉隆坡市中心"},
-    "sepang": {"lat": 2.935, "lon": 101.720, "dist": 1500, "name": "雪邦"},
-    "putrajaya": {"lat": 2.920, "lon": 101.680, "dist": 1500, "name": "布城"},
+class AreaConfig(TypedDict):
+    """Type definition for area configuration."""
+    lat: float
+    lon: float
+    dist: int
+    name: str
+
+AREA_CONFIGS: Dict[str, AreaConfig] = {
+    "kl":   {"lat": 3.110, "lon": 101.686, "dist": 5000, "name": "Kuala Lumpur"},
+    "singapore": {"lat": 1.352, "lon": 103.820, "dist": 3000, "name": "Singapore"},
+    "tokyo": {"lat": 35.676, "lon": 139.750, "dist": 3000, "name": "Tokyo"},
+    "berlin": {"lat": 52.520, "lon": 13.405, "dist": 3000, "name": "Berlin"},
 }
 DEFAULT_AREA: str = "kl"
 OSM_NETWORK_TYPE: str = "walk"
-BENCHMARK_TRIALS: int = 50
-BENCHMARK_MIN_DISTANCE_M: float = 200.0
-BENCHMARK_TIME_HOURS: List[int] = [6, 10, 14, 18, 21, 23]
