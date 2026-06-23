@@ -98,12 +98,6 @@ The application follows a three-tier architecture:
 
 ---
 
-## Screenshots
-
-*(Screenshots to be added)*
-
----
-
 ## Getting Started
 
 ### Prerequisites
