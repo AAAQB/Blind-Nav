@@ -3,3 +3,21 @@
 venv/
 .DS_Store
 Thumbs.db
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# 运行期生成物：路网/路线缓存与日志体积非常大（本机约 345 MB），
+# 都能由 OSM 数据与代码重新生成，不入库
+cache/*
+!cache/.gitkeep
+data/osm_cache/*
+!data/osm_cache/.gitkeep
+logs/*.log
+
+# 前端构建产物与依赖（可由 package.json / package-lock.json 完整还原，
+# 不是源码：请勿提交，避免每次改源码都要额外提交一次编译结果）
+frontend/node_modules/
+frontend/dist/
+frontend/tsconfig.tsbuildinfo

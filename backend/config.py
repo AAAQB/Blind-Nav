@@ -410,3 +410,129 @@ AREA_CONFIGS: Dict[str, AreaConfig] = {
 }
 DEFAULT_AREA: str = "kl"
 OSM_NETWORK_TYPE: str = "walk"
+
+
+# ══════════════════════════════════════════════════════════════════
+# Route Profiles — the alternatives computed for a single request
+# ══════════════════════════════════════════════════════════════════
+# `cost` selects the objective the search optimises:
+#   {"type": "weights", "preset": <PRESET_MODES key>}  → accessibility cost
+#   {"type": "distance"}                               → pure shortest walk
+#
+# `base_speed_mps` feeds the per-segment travel-time model (see
+# services/analysis.py): the same path takes longer for a blind pedestrian
+# than for a sighted one, so estimated duration is profile-aware.
+ROUTE_PROFILES: Dict[str, Dict[str, Any]] = {
+    "accessible": {
+        "label": "Most Accessible",
+        "short": "Accessible",
+        "description": "Maximises tactile paving and sidewalk coverage, avoids steps.",
+        "color": "#22d3a6",
+        "accent": "#0f766e",
+        "icon": "eye",
+        "mode": "blind",
+        "base_speed_mps": 1.15,
+        "cost": {"type": "weights", "preset": "blind"},
+    },
+    "fast": {
+        "label": "Fastest",
+        "short": "Fastest",
+        "description": "Shortest walking distance, ignores accessibility comfort.",
+        "color": "#4d8dff",
+        "accent": "#1d4ed8",
+        "icon": "route",
+        "mode": "balanced",
+        "base_speed_mps": 1.45,
+        "cost": {"type": "distance"},
+    },
+    "lit": {
+        "label": "Best Lit",
+        "short": "Night Safe",
+        "description": "Prefers well-lit segments — safest after dark.",
+        "color": "#f0b429",
+        "accent": "#b45309",
+        "icon": "moon",
+        "mode": "night",
+        "base_speed_mps": 1.25,
+        "cost": {"type": "weights", "preset": "night"},
+    },
+    "wheelchair": {
+        "label": "Step-Free",
+        "short": "Step-Free",
+        "description": "Step-free, smooth, wide paths with gentle slopes.",
+        "color": "#a78bfa",
+        "accent": "#6d28d9",
+        "icon": "wheelchair",
+        "mode": "wheelchair",
+        "base_speed_mps": 1.0,
+        "cost": {"type": "weights", "preset": "wheelchair"},
+    },
+}
+
+# Profiles computed when the client does not ask for a specific set.
+DEFAULT_PROFILES: List[str] = ["accessible", "fast", "lit"]
+
+# Max number of alternatives a single request may compute (protects latency).
+MAX_PROFILES_PER_REQUEST: int = 4
+
+# ── Speed model inputs (services/analysis.py) ──
+SURFACE_SPEED_FACTOR: Dict[str, float] = {
+    "asphalt": 1.0,
+    "concrete": 0.98,
+    "concrete:lanes": 0.95,
+    "concrete:plates": 0.95,
+    "paved": 0.97,
+    "paving_stones": 0.9,
+    "sett": 0.85,
+    "wood": 0.85,
+    "metal": 0.85,
+    "compacted": 0.85,
+    "fine_gravel": 0.8,
+    "gravel": 0.75,
+    "ground": 0.78,
+    "grass": 0.78,
+    "dirt": 0.75,
+    "sand": 0.6,
+}
+STEPS_SPEED_MPS: float = 0.4
+
+# ── Accessibility score tuning ──
+# Length-weighted tag quality (0..100) for each accessibility factor.
+FACTOR_QUALITY: Dict[str, Dict[str, float]] = {
+    "tactile":    {"yes": 100.0, "limited": 55.0, "incorrect": 20.0, "no": 10.0, "unknown": 10.0},
+    "lighting":   {"yes": 100.0, "24/7": 100.0, "automatic": 85.0, "limited": 55.0, "no": 15.0, "unknown": 15.0},
+    "sidewalk":   {"yes": 100.0, "both": 100.0, "separate": 80.0, "left": 70.0, "right": 70.0,
+                   "limited": 50.0, "no": 10.0, "none": 10.0, "unknown": 10.0},
+    "surface":    {"asphalt": 100.0, "concrete": 95.0, "paved": 95.0, "concrete:lanes": 90.0,
+                   "concrete:plates": 88.0, "paving_stones": 78.0, "sett": 70.0, "wood": 65.0,
+                   "metal": 65.0, "compacted": 62.0, "fine_gravel": 55.0, "ground": 50.0,
+                   "grass": 50.0, "dirt": 42.0, "gravel": 40.0, "sand": 25.0, "unknown": 55.0},
+    "width":      {"_default": 60.0},
+}
+# Relative importance of each factor for the overall score, per profile.
+FACTOR_WEIGHTS: Dict[str, Dict[str, float]] = {
+    "accessible": {"tactile": 0.30, "lighting": 0.15, "sidewalk": 0.25, "surface": 0.15, "incline": 0.07, "width": 0.08},
+    "fast":       {"tactile": 0.15, "lighting": 0.15, "sidewalk": 0.20, "surface": 0.20, "incline": 0.15, "width": 0.15},
+    "lit":        {"tactile": 0.12, "lighting": 0.45, "sidewalk": 0.18, "surface": 0.13, "incline": 0.06, "width": 0.06},
+    "wheelchair": {"tactile": 0.10, "lighting": 0.10, "sidewalk": 0.20, "surface": 0.22, "incline": 0.20, "width": 0.18},
+}
+# Score deducted per steps segment (a flight of stairs is a hard blocker).
+STEPS_SCORE_PENALTY: float = 9.0
+STEPS_SCORE_PENALTY_CAP: float = 35.0
+
+# ── Risk classification thresholds ──
+NARROW_WIDTH_M: float = 1.5
+VERY_NARROW_WIDTH_M: float = 1.2
+STEEP_INCLINE_PCT: float = 10.0
+POOR_SURFACES: List[str] = ["unpaved", "gravel", "fine_gravel", "dirt", "ground", "grass", "sand", "compacted"]
+UNLIT_VALUES: List[str] = ["no", "unknown", "limited"]
+
+# ── Geocoding (services/geocode.py) ──
+GEOCODE_USER_AGENT: str = "BlindNav/2.0 (accessibility routing demo)"
+GEOCODE_MIN_INTERVAL_S: float = 1.1   # Nominatim usage policy: max 1 req/s
+GEOCODE_CACHE_TTL_S: int = 60 * 60 * 24 * 7
+GEOCODE_TIMEOUT_S: float = 8.0
+
+# ── Routing response cache ──
+ROUTE_CACHE_SIZE: int = 64
+ROUTE_CACHE_TTL_S: int = 120

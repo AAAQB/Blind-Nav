@@ -23,16 +23,25 @@
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
   - [Running the Application](#running-the-application)
+  - [Frontend Development](#frontend-development)
 - [Usage Guide](#usage-guide)
   - [Navigation Modes](#navigation-modes)
   - [Time-Aware Routing](#time-aware-routing)
   - [Route Analysis](#route-analysis)
+  - [Map Interaction](#map-interaction)
+  - [Keyboard Shortcuts](#keyboard-shortcuts)
 - [Algorithm Details](#algorithm-details)
   - [Accessibility Cost Function](#accessibility-cost-function)
   - [Time-Dependent Dynamic Cost](#time-dependent-dynamic-cost)
   - [Weighted Bidirectional A\* (Fusion Algorithm)](#weighted-bidirectional-a-fusion-algorithm)
 - [Project Structure](#project-structure)
 - [API Reference](#api-reference)
+  - [`GET /api/health`](#get-apihealth)
+  - [`POST /api/shortest_path`](#post-apishortest_path)
+  - [`GET /api/v2/meta`](#get-apiv2meta)
+  - [`POST /api/v2/routes`](#post-apiv2routes)
+  - [`GET /api/v2/search`](#get-apiv2search)
+  - [`GET /api/v2/reverse`](#get-apiv2reverse)
 - [Configuration](#configuration)
   - [Navigation Modes](#navigation-modes-1)
   - [Area Definitions](#area-definitions)
@@ -50,8 +59,16 @@
 - **Multi-City Support** — Pre-configured for Kuala Lumpur, Singapore, Tokyo, and Berlin, with dynamic area loading for any location worldwide.
 - **Time-Aware Dynamic Costs** — Lighting and crowd multipliers adjust route costs by hour of day (dawn, day, dusk, night, late night).
 - **Multiple Navigation Modes** — Preset weight profiles for Blind, Wheelchair, Elderly, and Balanced preferences.
-- **Interactive Map UI** — Built with React + MapLibre GL JS. Click to set start/end points, switch map styles, and view route details.
-- **Rich Route Analysis** — Per-route statistics including tactile paving coverage, lighting percentage, sidewalk availability, steps count, and road type breakdown.
+- **Side-by-Side Alternatives** — One request evaluates several objectives at once (*Most Accessible*, *Fastest*, *Best Lit*, *Step-Free*) so the trade-off between speed and comfort is visible instead of implied.
+- **Explainable Routes** — Every segment keeps its raw OpenStreetMap attributes, so the map can be coloured by tactile paving, lighting, sidewalk, surface or slope, and any stretch can be tapped for the underlying data.
+- **Hazard Timeline** — Steps, unlit stretches and missing sidewalks are merged into distance-ordered hazards with a severity rating and a position on the map.
+- **Turn-by-Turn Directions** — Bearing changes and street names produce a readable instruction list (e.g. *Turn left onto Jalan Sultan*), each row highlighting its own stretch of the route.
+- **Accessibility Grading** — A 0–100 score with a six-axis factor profile (tactile, lighting, sidewalk, surface, slope, width), tuned per profile.
+- **Three Themes** — Deep-space neon (default), daylight glass, and a high-contrast mode with larger type, plus a reduced-motion switch.
+- **Chinese and English UI** — The interface ships in Simplified Chinese and switches to English from the map toolbar; the choice is remembered between visits.
+- **Real 3D** — A DEM-backed terrain surface (Mapzen/AWS terrarium tiles) plus extruded OpenStreetMap buildings on vector basemaps, with a theme-matched sky and fog.
+- **Satellite Basemap** — Esri World Imagery with a boundaries-and-places label overlay, draped over the same terrain, for a photographic view of the route.
+- **Keyboard and Screen-Reader Support** — Full ARIA labelling, a combobox place search, shortcut keys (`?` lists them), and optional spoken route summaries.
 - **Weighted Bidirectional A\* Algorithm** — A fusion of weighted heuristic search and bidirectional meet-in-the-middle expansion for optimal accessibility-aware pathfinding.
 - **RESTful API** — Clean Flask backend with JSON endpoints for seamless integration.
 
@@ -60,40 +77,43 @@
 ## System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Frontend (Browser)                     │
-│  ┌─────────────────────────────────────────────────────┐ │
-│  │   React SPA · MapLibre GL JS · MapTiles / OSM       │ │
-│  └───────────────────────┬─────────────────────────────┘ │
-│                          │ HTTP / JSON                    │
-├──────────────────────────┼──────────────────────────────┤
-│                    Backend (Flask)                        │
-│  ┌───────────────────────┴─────────────────────────────┐ │
-│  │  /api/shortest_path   /api/health                    │ │
-│  │  GraphManager · KDTree spatial index                 │ │
-│  └───────────────────────┬─────────────────────────────┘ │
-│                          │                               │
-│  ┌───────────────────────┴─────────────────────────────┐ │
-│  │  Algorithm Layer                                     │ │
-│  │  ┌──────────────────────────────────────────────┐   │ │
-│  │  │  Weighted A* · Bidirectional A*              │   │ │
-│  │  │  CostFunction · StaticCost · TimeDependentCost│   │ │
-│  │  └──────────────────────────────────────────────┘   │ │
-│  └───────────────────────┬─────────────────────────────┘ │
-│                          │                               │
-│  ┌───────────────────────┴─────────────────────────────┐ │
-│  │  Data Layer                                          │ │
-│  │  ┌──────────────────────────────────────────────┐   │ │
-│  │  │  OSMLoader · OSMnx · Pickle Cache            │   │ │
-│  │  └──────────────────────────────────────────────┘   │ │
-│  └─────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────┐
+│                     Frontend (Browser)                      │
+│  ┌───────────────────────────────────────────────────────┐ │
+│  │  Vite · React · TypeScript · Tailwind                 │ │
+│  │  MapLibre GL JS · design tokens · 3 themes            │ │
+│  └───────────────────────┬───────────────────────────────┘ │
+│                          │ HTTP / JSON                      │
+├──────────────────────────┼────────────────────────────────┤
+│                     Backend (Flask)                          │
+│  ┌───────────────────────┴───────────────────────────────┐ │
+│  │  API layer (blueprints)                               │ │
+│  │  legacy.py   meta.py   routes_v2.py   search.py       │ │
+│  └───────────────────────┬───────────────────────────────┘ │
+│  ┌───────────────────────┴───────────────────────────────┐ │
+│  │  Service layer                                        │ │
+│  │  GraphManager · route_service · analysis · geocode    │ │
+│  └───────────────────────┬───────────────────────────────┘ │
+│  ┌───────────────────────┴───────────────────────────────┐ │
+│  │  Algorithm Layer                                      │ │
+│  │  ┌────────────────────────────────────────────────┐   │ │
+│  │  │  Weighted A* · Bidirectional A*                │   │ │
+│  │  │  CostFunction · StaticCost · TimeDependentCost │   │ │
+│  │  └────────────────────────────────────────────────┘   │ │
+│  └───────────────────────┬───────────────────────────────┘ │
+│  ┌───────────────────────┴───────────────────────────────┐ │
+│  │  Data Layer                                           │ │
+│  │  ┌────────────────────────────────────────────────┐   │ │
+│  │  │  OSMLoader · OSMnx · Pickle Cache · KDTree     │   │ │
+│  │  └────────────────────────────────────────────────┘   │ │
+│  └───────────────────────────────────────────────────────┘ │
+└───────────────────────────────────────────────────────────┘
 ```
 
 The application follows a three-tier architecture:
 
-1. **Frontend** — Single-page application built with vanilla React (no build step) and MapLibre GL JS for map rendering.
-2. **Backend** — Flask server providing REST API endpoints for path computation and health status.
+1. **Frontend** — A Vite-built React + TypeScript single-page app styled with Tailwind. MapLibre GL JS renders the basemap and every overlay (routes, per-segment colouring, hazard pins); all charts are hand-drawn SVG so no charting library is needed.
+2. **Backend** — Flask, split into a thin API layer (blueprints) and a service layer holding the routing logic, so the same code backs both the frozen v1 endpoint and the richer v2 API.
 3. **Data** — OpenStreetMap data fetched via OSMnx, enriched with accessibility tags, and cached locally as pickle files.
 
 ---
@@ -104,7 +124,13 @@ The application follows a three-tier architecture:
 
 - **Python** 3.10 or higher
 - **pip** (Python package manager)
+- **Node.js** 18 or higher with npm (frontend build)
 - A modern web browser (Chrome, Firefox, Edge, Safari)
+
+> The map basemap and the optional place search need internet access. Basemap
+> tiles come from OpenFreeMap (vector) or OpenStreetMap (raster), and place
+> search is proxied through the backend to Nominatim. Neither needs an API key;
+> fonts are bundled with the frontend, so nothing else is fetched at runtime.
 
 ### Installation
 
@@ -136,9 +162,19 @@ The application follows a three-tier architecture:
    ```
    This downloads the road network for all pre-configured cities. The data is cached in `data/osm_cache/` for faster subsequent loads.
 
+5. **Build the frontend**
+   ```bash
+   cd frontend
+   npm install
+   npm run build
+   ```
+   The bundle lands in `frontend/dist/`, which the Flask server picks up
+   automatically. (If `dist/` is missing, the server falls back to the original
+   no-build UI in `frontend/public/` so the API stays usable.)
+
 ### Running the Application
 
-1. **Start the Flask server**
+1. **Start the Flask server** (from the repository root)
    ```bash
    python backend/app.py
    ```
@@ -151,6 +187,26 @@ The application follows a three-tier architecture:
    ```bash
    PORT=8080 DEBUG=1 python backend/app.py
    ```
+
+### Frontend Development
+
+The UI is a Vite + React + TypeScript + Tailwind project. For hot reload while
+editing components, run the Flask API and the Vite dev server side by side:
+
+```bash
+# terminal 1 — API only
+python backend/app.py
+
+# terminal 2 — UI with HMR, proxies /api to the Flask server
+cd frontend
+npm run dev        # http://localhost:5173
+```
+
+`npm run build` refreshes `frontend/dist/` for the single-server deployment.
+
+In dev builds the live MapLibre instance is exposed as `window.__bnMap`, which is
+handy for poking at terrain, layers and the camera from the browser console. It
+is stripped from production builds.
 
 ---
 
@@ -183,17 +239,80 @@ At night, the dynamic cost model triples the cost of unlit segments, naturally s
 
 ### Route Analysis
 
-After computing a route, the sidebar displays detailed analytics:
+Every request returns a set of alternatives, and the right-hand panel explains
+the selected one in four views:
 
-- **Distance** — Total path length in meters
-- **Estimated Time** — Walking time at ~1.4 m/s
-- **Total Cost** — Aggregated accessibility cost score
-- **Nodes Explored** — How many graph nodes were visited during search
-- **Route Analysis Bars**:
-  - **Tactile Paving** — Percentage of edges with tactile paving
-  - **Lighting** — Percentage of edges that are lit
-  - **Sidewalk** — Percentage of edges with sidewalks
-- **Smart Notes** — Natural language suggestions (e.g., "Good tactile paving coverage", "No steps on route")
+**Comparison cards** — one per alternative, with an animated score dial, grade,
+distance, walking time, step count, and tactile/lighting/sidewalk coverage bars.
+Badges mark which alternative wins on score, speed and distance.
+
+| Profile | Objective | Typical outcome |
+|---------|-----------|-----------------|
+| **Most Accessible** | Blind-mode weights | Tactile paving and sidewalks, no steps |
+| **Fastest** | Pure walking distance | Shorter, but may cross unlit streets without sidewalks |
+| **Best Lit** | Night-mode weights | Longer, but fully lit |
+| **Step-Free** | Wheelchair weights | Smooth, wide, gentle slopes |
+
+**Overview** — a six-axis accessibility radar (tactile, lighting, sidewalk,
+surface, slope, width) plus composition stats: rough ground, steps length,
+narrowest point, mean slope, node and exploration counts, and the top highway
+types on the route.
+
+**Hazards** — a distance-ordered timeline where each band is sized by the real
+stretch it covers, with a severity rating (high / caution / minor) and a list of
+every hazard. Hovering a band highlights it on the map; clicking opens a popup.
+
+**Steps** — turn-by-turn directions derived from bearing changes and street
+names. Hovering a row highlights exactly the stretch it describes; clicking
+zooms to it.
+
+**Slope** — a ground profile chart with a 10% barrier line and steep stretches
+marked, plus mean/peak slope readouts.
+
+Tapping any stretch of a route on the map opens a **segment inspector** showing
+the raw OpenStreetMap tags behind the scoring decision.
+
+### Map Interaction
+
+- **Colour by** — switch the route colouring between hazard level, tactile
+  paving, lighting, sidewalk, surface and slope (`C` cycles).
+- **Hazard pins** — one marker per hazard, filterable by minimum severity.
+- **Basemaps** — Night, Midnight, Daylight, Liberty (all OpenFreeMap vector
+  tiles), Esri satellite imagery with a labels overlay, and OSM Standard raster
+  (`B` cycles). Every option is key-free, so the demo works from a fresh clone
+  without credentials. The switcher sits in the bottom-right corner of the open
+  map area, so it never ends up underneath a panel. If a basemap cannot be
+  reached, the map says so and offers another one instead of going blank.
+- **3D** — tilts the camera to 52° and layers two things on top of the basemap:
+  a terrain surface built from Mapzen/AWS terrarium DEM tiles, and extruded
+  buildings (`fill-extrusion`) grown from `render_height`/`render_min_height` on
+  the vector styles. Buildings need a vector basemap; with satellite or OSM
+  Standard the terrain still applies and the map offers a one-click switch back
+  to a vector style. Extrusions are inserted underneath the route overlays, so
+  the coloured route stays on top.
+- **Language** — the toolbar switch flips the whole interface between
+  Simplified Chinese and English, including the generated turn-by-turn wording
+  and the spoken route summary.
+- **Draggable markers** — drag the start or destination pin to re-plan.
+- **Shareable links** — the URL always encodes both points, the hour, the
+  chosen profiles and the colour factor.
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `S` / `E` | Arm start / destination picking on the map |
+| `Enter` | Compute the route |
+| `1`–`4` | Focus an alternative |
+| `C` | Cycle the map colour factor |
+| `T` | Cycle the theme |
+| `B` | Cycle the basemap |
+| `D` | Toggle 3D terrain and buildings |
+| `D` | Toggle 3D terrain and buildings |
+| `L` | Toggle large text |
+| `V` | Read the selected route aloud |
+| `?` | Show the shortcut list |
+| `Esc` | Cancel picking or close panels |
 
 ---
 
@@ -255,8 +374,22 @@ This fusion typically explores **far fewer nodes** than standard unidirectional 
 ```
 ├── backend/
 │   ├── __init__.py
-│   ├── app.py                  # Flask application entry point & API routes
-│   ├── config.py               # Score maps, weights, area configs, time slots
+│   ├── app.py                  # App factory: logging, CORS, blueprint registration
+│   ├── paths.py                # Locates frontend/dist (falls back to public/)
+│   ├── config.py               # Score maps, weights, profiles, areas, time slots
+│   ├── api/                    # HTTP layer (thin)
+│   │   ├── __init__.py         # register_blueprints()
+│   │   ├── legacy.py           # /, static files, /api/health, /api/shortest_path
+│   │   ├── meta.py             # /api/v2/meta — UI metadata and design scales
+│   │   ├── routes_v2.py        # /api/v2/routes — alternatives + enrichment
+│   │   └── search.py           # /api/v2/search, /api/v2/reverse (geocoding)
+│   ├── services/               # Domain logic (testable, no Flask imports)
+│   │   ├── graph_manager.py    # Graph loading, KDTree index, snapping, area choice
+│   │   ├── cost.py             # Cost-function builders shared by v1 and v2
+│   │   ├── route_service.py    # Multi-profile planning, dedupe, response shaping
+│   │   ├── analysis.py         # Segments, hazards, directions, scoring, summaries
+│   │   ├── geocode.py          # Nominatim proxy with disk cache + rate limiting
+│   │   └── cache.py            # TTL + LRU cache for routing responses
 │   ├── algorithm/
 │   │   ├── __init__.py
 │   │   ├── astar.py            # Weighted A* search implementation
@@ -270,14 +403,27 @@ This fusion typically explores **far fewer nodes** than standard unidirectional 
 │   └── utils/
 │       ├── __init__.py
 │       └── geoutils.py         # Haversine, Euclidean approx, bearing
-├── frontend/
-│   └── public/
-│       └── index.html          # Single-page React application
+├── frontend/                   # Vite + React + TypeScript + Tailwind
+│   ├── index.html
+│   ├── package.json
+│   ├── vite.config.ts          # Dev proxy /api -> Flask, build to dist/
+│   └── src/
+│       ├── main.tsx            # Entry: fonts, providers, mount
+│       ├── App.tsx             # State orchestration, layout, shortcuts
+│       ├── styles/index.css    # Design tokens for the three themes
+│       ├── lib/                # Types, API client, geo, risk, speech, themes
+│       ├── hooks/              # Meta, routes, places, media query, debounce
+│       └── components/
+│           ├── ui/             # Icon set and primitives (button, pill, card…)
+│           ├── panel/          # Control surface: search, inputs, time, themes
+│           ├── map/            # MapLibre lifecycle, route/segment/hazard layers
+│           └── results/        # Comparison cards, radar, timeline, directions
+│   └── public/                 # Legacy no-build UI (fallback only)
 ├── scripts/
 │   └── download_osm_data.py    # Pre-download OSM data for configured areas
 ├── data/
 │   └── osm_cache/              # Pickle cache of downloaded OSM graphs
-├── cache/                      # API-level JSON cache
+├── cache/                      # Geocode JSON cache
 ├── logs/                       # Application logs
 └── requirements.txt            # Python dependencies
 ```
@@ -366,6 +512,204 @@ Computes the optimal accessibility-aware route between two points.
 }
 ```
 
+> This endpoint is frozen for backward compatibility. New clients should use
+> `/api/v2/routes`, which returns the same search results plus the alternatives,
+> per-segment attributes, hazards and directions described below.
+
+### `GET /api/v2/meta`
+
+Everything the UI needs so it hardcodes nothing: areas, profiles, modes (with
+their weights), time slots, segment colour scales, hazard catalogue, severity
+levels and the current graph size. Also reports `ui`, which is `vite-dist` when
+the built bundle is being served and `legacy-public` otherwise.
+
+```json
+{
+  "api_version": "2.0",
+  "ui": "vite-dist",
+  "areas": [{"id": "kl", "name": "Kuala Lumpur", "lat": 3.11, "lon": 101.686, "span_m": 5000, "zoom": 14}],
+  "default_area": "kl",
+  "profiles": [{"id": "accessible", "label": "Most Accessible", "short": "Accessible", "color": "#22d3a6", "icon": "eye", "mode": "blind", "description": "…"}],
+  "default_profiles": ["accessible", "fast", "lit"],
+  "max_profiles": 4,
+  "modes": [{"id": "blind", "name": "Blind Mode", "weights": {"tactile_paving": 5.0, "steps": 5.0}}],
+  "time_slots": [{"name": "night", "label": "Night", "start_hour": 20, "end_hour": 23, "lighting_multiplier": 3.0, "crowd_multiplier": 1.5}],
+  "segment_factors": [{"id": "risk", "label": "Hazard level", "scale": [{"value": "high", "color": "#ff4d5f", "label": "High risk"}]}],
+  "risk_catalog": [{"type": "steps", "label": "Steps", "severity": "high"}],
+  "severities": [{"id": "high", "label": "High", "color": "#ff4d5f"}],
+  "graph": {"nodes": 104843, "edges": 118120, "avg_degree": 2.25, "area": "kl"}
+}
+```
+
+### `POST /api/v2/routes`
+
+Plans every requested alternative in one call and enriches each with its
+per-segment attributes, hazards, directions and accessibility grade.
+
+**Request:**
+
+```json
+{
+  "start": {"lat": 3.1489, "lon": 101.6957},
+  "end": {"lat": 3.1400, "lon": 101.7000},
+  "hour": 21,
+  "area": "kl",
+  "profiles": ["accessible", "fast", "lit"],
+  "use_dynamic_cost": true
+}
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `start` / `end` | object | — | `{lat, lon}`; flat `start_lat` / `start_lon` pairs also accepted |
+| `hour` | int | `14` | Departure hour (0–23) |
+| `area` | string | `"kl"` | Preferred graph; ignored when the coordinates fall outside it |
+| `profiles` | string[] | `["accessible","fast","lit"]` | Any of `accessible`, `fast`, `lit`, `wheelchair` (max 4) |
+| `use_dynamic_cost` | bool | `true` | Apply the time-of-day multipliers |
+| `use_bidirectional` | bool | `true` | Use bidirectional A\*; `false` falls back to weighted A\* |
+
+**Response (abridged):**
+
+```json
+{
+  "status": "success",
+  "request": {"hour": 21, "area": "kl", "time_slot": {"name": "night", "lighting_multiplier": 3.0, "crowd_multiplier": 1.5}},
+  "snapped": {"start": {"node_id": 12260602442, "lat": 3.1489345, "lon": 101.6955503, "distance_m": 17.1}},
+  "graph": {"nodes": 104843, "edges": 118120, "area": "kl"},
+  "routes": [
+    {
+      "id": "accessible",
+      "label": "Most Accessible",
+      "color": "#22d3a6",
+      "score": 83,
+      "grade": "B",
+      "factors": {"tactile": 55, "lighting": 100, "sidewalk": 100, "surface": 82, "incline": 90, "width": 100},
+      "summary": "Rated 83/100: step-free, little tactile paving, well lit, sidewalk throughout.",
+      "total_distance_m": 1612.9,
+      "duration_s": 1740.2,
+      "duration_min": 29,
+      "algorithm": "bidirectional_a*",
+      "explored_count": 15291,
+      "path": [[3.1489345, 101.6955503], [3.1492066, 101.6956286]],
+      "segments": [
+        {
+          "index": 0,
+          "coordinates": [[3.1489345, 101.6955503], [3.1492066, 101.6956286]],
+          "length_m": 31.48,
+          "duration_s": 35.3,
+          "highway": "footway",
+          "name": null,
+          "tactile_paving": "limited",
+          "lit": "yes",
+          "sidewalk": "yes",
+          "surface": "paving_stones",
+          "incline_pct": 2.0,
+          "width_m": 2.0,
+          "steps": false,
+          "risk": "low",
+          "risk_reasons": [{"code": "limited_tactile", "label": "Limited tactile paving", "severity": "low"}]
+        }
+      ],
+      "risks": [
+        {
+          "id": "risk-no_sidewalk-42",
+          "type": "no_sidewalk",
+          "severity": "high",
+          "label": "No sidewalk",
+          "detail": "Walking in the roadway — stay close to the kerb",
+          "from": [3.1471, 101.6992],
+          "to": [3.1468, 101.6998],
+          "at": [3.1468, 101.6998],
+          "offset_m": 412.5,
+          "length_m": 63.2,
+          "segment_indexes": [42, 43]
+        }
+      ],
+      "directions": [
+        {"type": "depart", "icon": "start", "instruction": "Head north-northeast", "street": null, "distance_m": 41.4, "position": [3.1489345, 101.6955503], "angle": null},
+        {"type": "turn", "icon": "left", "instruction": "Turn left onto Jalan Sultan", "street": "Jalan Sultan", "distance_m": 287.0, "position": [3.1462, 101.6987], "angle": -82.4},
+        {"type": "arrive", "icon": "destination", "instruction": "Arrive at destination", "street": null, "distance_m": 0.0, "position": [3.14, 101.7], "angle": null}
+      ],
+      "metrics": {
+        "total_edges": 131,
+        "tactile_pct": 0.0,
+        "lit_pct": 100.0,
+        "sidewalk_pct": 100.0,
+        "steps_count": 0,
+        "steps_length_m": 0.0,
+        "max_incline_pct": 2.0,
+        "mean_incline_pct": 1.8,
+        "min_width_m": 2.0,
+        "rough_length_m": 0.0,
+        "top_highways": [{"name": "footway", "pct": 76.3}, {"name": "pedestrian", "pct": 23.7}]
+      },
+      "bounds": {"south": 3.14, "north": 3.1493, "west": 101.6955, "east": 101.7001},
+      "also_matches": ["lit"]
+    }
+  ],
+  "highlights": {"best_score": "lit", "fastest": "fast", "shortest": "fast", "aliases": {}}
+}
+```
+
+Routes whose paths are identical are folded together: the duplicate is dropped
+and recorded in the kept route's `also_matches`, and `highlights.aliases` maps
+the surviving id to the labels it also satisfies.
+
+**Errors** use a stable envelope so the UI can react precisely:
+
+```json
+{"status": "error", "code": "graph_loading", "message": "Map data still loading, please try again (first launch downloads from OpenStreetMap)"}
+```
+
+| Code | HTTP | Meaning |
+|------|------|---------|
+| `missing_coordinates` | 400 | `start` / `end` absent or incomplete |
+| `invalid_coordinates` | 400 | Non-numeric, out of range, or the `(0,0)` sentinel |
+| `invalid_profiles` | 400 | No recognised profile id in `profiles` |
+| `no_network` | 400 | No road network near the requested point |
+| `no_path` | 404 | No feasible path for any profile |
+| `graph_loading` | 503 | The OpenStreetMap extract for this area is still downloading |
+| `internal_error` | 500 | Unexpected failure (logged server-side) |
+
+### `GET /api/v2/search`
+
+Forward geocoding through a server-side Nominatim proxy (project User-Agent,
+one request per second, on-disk cache under `cache/geocode/`). Queries shorter
+than three characters return an empty list without touching the network.
+
+```
+GET /api/v2/search?q=KLCC&limit=6
+```
+
+```json
+{
+  "status": "success",
+  "query": "KLCC",
+  "results": [
+    {"id": "351317315", "name": "KLCC", "label": "KLCC, 156, Jalan Ampang, Kuala Lumpur, Malaysia", "category": "tourism", "type": "attraction", "lat": 3.1592, "lon": 101.7134, "bbox": {"south": 3.15, "north": 3.16, "west": 101.71, "east": 101.72}}
+  ]
+}
+```
+
+### `GET /api/v2/reverse`
+
+Turns a map click into a readable address.
+
+```
+GET /api/v2/reverse?lat=3.1489&lon=101.6957
+```
+
+```json
+{
+  "status": "success",
+  "place": {"label": "Jalan Benteng, Bukit Bintang, Kuala Lumpur, 50050, Malaysia", "name": "Jalan Benteng", "road": "Jalan Benteng", "suburb": "Bukit Bintang", "city": "Kuala Lumpur", "country": "Malaysia", "lat": 3.1489, "lon": 101.6957}
+}
+```
+
+Both geocoding endpoints answer with `code: "geocode_unavailable"` and HTTP 502
+when Nominatim cannot be reached, which the UI degrades to coordinate-only
+input.
+
 ---
 
 ## Configuration
@@ -442,7 +786,11 @@ The tag filling priority is:
 - **[OpenStreetMap](https://www.openstreetmap.org/)** — Primary source for road networks and accessibility tags (tactile_paving, sidewalk, lit, surface, incline, width, etc.).
 - **[OSMnx](https://osmnx.readthedocs.org/)** — Python library for downloading and modeling OSM street networks.
 - **[MapLibre GL JS](https://maplibre.org/)** — Open-source map rendering library for the frontend.
-- **[OpenFreeMap](https://openfreemap.org/)** — Free map tile service used for the "Liberty" map style (no API key required).
+- **[OpenFreeMap](https://openfreemap.org/)** — Key-free vector tile service backing the Night, Midnight, Daylight and Liberty basemaps, including fonts and sprites.
+- **[Esri World Imagery](https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9)** — Satellite basemap, with the *World Boundaries and Places* reference layer drawn on top for labels.
+- **[Mapzen / AWS Open Data terrain tiles](https://registry.opendata.aws/terrain-tiles/)** — Terrarium-encoded DEM tiles that drive the 3D terrain surface.
+- **[Nominatim](https://nominatim.org/)** — Geocoding for the place-search box, proxied through the backend with a project User-Agent and one request per second.
+- **[CARTO](https://carto.com/)** — *No longer used.* Its free raster basemaps now answer with an "API key required" placeholder image, which is why every basemap became key-free.
 
 ---
 
@@ -454,10 +802,19 @@ The tag filling priority is:
 pytest
 ```
 
+> The repository currently ships no test suite; `pytest` is listed for the
+> cases the service layer is designed for (it takes plain dicts and graphs, so
+> it can be exercised without Flask or the network).
+
 ### Linting
 
 ```bash
-ruff check .
+# Python
+ruff check backend
+
+# TypeScript / React
+cd frontend
+npm run typecheck
 ```
 
 ### Adding a New City
@@ -466,9 +823,10 @@ ruff check .
    ```python
    "paris": {"lat": 48.8566, "lon": 2.3522, "dist": 3000, "name": "Paris"},
    ```
-2. (Optional) Add region tag overrides in `REGION_TAG_OVERRIDES`.
-3. Add the city to the `AREAS` array in `frontend/public/index.html`.
-4. Pre-download the data:
+2. (Optional) Add region tag overrides in `REGION_TAG_OVERRIDES`. The city
+   appears in the UI automatically — `/api/v2/meta` publishes every area, so no
+   frontend change is required.
+3. Pre-download the data:
    ```bash
    python scripts/download_osm_data.py --area paris
    ```
@@ -476,8 +834,12 @@ ruff check .
 ### Adding a New Navigation Mode
 
 1. Add a `WeightCoefficients` entry to `PRESET_MODES` in `backend/config.py`.
-2. Add the mode button to the `MODES` array in `frontend/public/index.html`.
-3. Add a color and icon mapping in the `COL` dictionary and `icons` object.
+2. If it should appear as a comparison alternative, add a matching entry to
+   `ROUTE_PROFILES` (label, colour, icon, `base_speed_mps`, and a `cost`
+   descriptor referencing the preset). It is then offered by `/api/v2/meta`
+   with no frontend change.
+3. Add an icon in `frontend/src/components/ui/Icon.tsx` if the profile uses a
+   new glyph.
 
 ---
 

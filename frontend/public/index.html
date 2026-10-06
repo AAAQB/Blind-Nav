@@ -1,4 +1,10 @@
 <!DOCTYPE html>
+<!--
+  Legacy v1 UI (no build step). The current interface lives in ../src and is
+  built to frontend/dist/, which the Flask server prefers. This file is only
+  served when dist/ is absent, so the API stays usable before the first
+  `npm run build`. It talks to the frozen /api/shortest_path endpoint.
+-->
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
